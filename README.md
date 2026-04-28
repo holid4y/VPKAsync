@@ -1,23 +1,17 @@
-# async_vpk
+# VPKAsync - Async VPK Compiler
 
-A small tool that turns a folder into VPK files for Source Engine and TF2.
+A small tool that transforms a folder into VPK files for the Source Engine, created with Team Fortress 2 in mind.
+It reads the files in a folder, builds the VPK structure, and writes the output in the format expected by the engine, the same as Valve's vpk.exe already does, but 4x faster.
 
-It reads the files in a folder, builds the VPK structure, and writes the output in the format the game expects.
+If the input folder exceeds 200 MB, the tool automatically enables it's multi-chunk mode.
+In this mode, the output is split into multiple VPK files (_000.vpk, _001.vpk, etc.) along with a _dir.vpk index, ensuring compatibility with the Source Engine format.
 
-If the input folder is small, it creates one `.vpk` file.
-If the folder is larger than 200 MB, it switches to multi-chunk mode automatically.
+## 1. Installation
+Download a prebuilt binary from the [Releases](https://github.com/UnusualHatter/VPKAsync/releases) page.
 
-## Install
+After downloading it just run the executable:
 
-### 1. Download a release
-
-If you just want to use the tool, grab the compiled build from the GitHub Releases page.
-
-After downloading, run:
-
-```bat
 async_vpk.exe
-```
 
 ### 2. Build from source
 
@@ -83,8 +77,6 @@ The tool runs in three steps:
 1. scan the folder and collect files
 2. read files in parallel and calculate CRC32
 3. write the final VPK files
-
-For folders above 200 MB, multi-chunk mode is enforced so the tool stays within the practical limits of the format.
 
 ## Notes
 
