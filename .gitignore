@@ -1,0 +1,5 @@
+/target/
+/async_vpk.exe
+/build
+*.pdb
+*.d
