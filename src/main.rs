@@ -13,9 +13,40 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use walkdir::WalkDir;
+use std::env;
 
 const SINGLE_VPK_LIMIT: u64 = 600 * 1024 * 1024;
 const CHUNK_SIZE: u64 = 600 * 1024 * 1024;
+const CONFIG_FILENAME: &str = ".vpk_tool_config";
+
+fn get_config_path() -> Result<PathBuf> {
+    if let Ok(app_data) = env::var("APPDATA") {
+        Ok(PathBuf::from(app_data).join(CONFIG_FILENAME))
+    } else if let Ok(home) = env::var("HOME") {
+        Ok(PathBuf::from(home).join(CONFIG_FILENAME))
+    } else {
+        Err(anyhow!("Could not determine config directory"))
+    }
+}
+
+fn load_output_dir() -> Option<PathBuf> {
+    if let Ok(config_path) = get_config_path() {
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            let path = PathBuf::from(content.trim());
+            if path.exists() && path.is_dir() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn save_output_dir(path: &Path) -> Result<()> {
+    if let Ok(config_path) = get_config_path() {
+        fs::write(&config_path, path.to_string_lossy().to_string())?;
+    }
+    Ok(())
+}
 
 #[repr(C, packed)]
 struct VpkHeader {
@@ -39,7 +70,7 @@ struct FileEntry {
 #[command(
     name = "async_vpk",
     about = "Async/parallel VPK creator for TF2 - replacement for Valve's vpk.exe",
-    version = "1.1.0"
+    version = "1.1.1"
 )]
 struct Cli {
     #[arg(help = "Folder to be packaged into a VPK")]
@@ -103,7 +134,7 @@ impl Default for VpkGuiApp {
         Self {
             input_dir: None,
             input_size: None,
-            output_dir: None,
+            output_dir: load_output_dir(),
             mode_choice: ModeChoice::Single,
             running: false,
             logs: vec!["Drag and drop an input folder here or click 'Select input folder'.".to_string()],
@@ -280,6 +311,7 @@ impl eframe::App for VpkGuiApp {
                     if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                         self.logs
                             .push(format!("Output folder selected: {}", folder.display()));
+                        let _ = save_output_dir(&folder);
                         self.output_dir = Some(folder);
                     }
                 }
@@ -481,12 +513,17 @@ where
     log(format!("Output base: {}", out_base.display()));
     log("[1/3] Collecting files...".to_string());
 
-    let files: Vec<PathBuf> = WalkDir::new(&input)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.into_path())
-        .collect();
+    let mut files = Vec::new();
+    for entry in WalkDir::new(&input) {
+        match entry {
+            Ok(e) => {
+                if e.file_type().is_file() {
+                    files.push(e.into_path());
+                }
+            }
+            Err(e) => log(format!("Warning: Skipping inaccessible path: {}", e)),
+        }
+    }
 
     if files.is_empty() {
         return Err(anyhow!("No files found in the selected folder."));
@@ -570,12 +607,14 @@ where
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_lowercase();
+                let ext = if ext.is_empty() { " ".to_string() } else { ext };
 
                 let stem = rel
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_string();
+                let stem = if stem.is_empty() { " ".to_string() } else { stem };
 
                 let dir = rel
                     .parent()
@@ -622,6 +661,9 @@ where
         read_entries()
     };
 
+    // FFD: sort largest-first so the packing loop achieves ~95% bin utilization
+    entries.sort_unstable_by_key(|e| std::cmp::Reverse(e.size));
+
     let errs = errors.into_inner().unwrap_or_default();
     if !errs.is_empty() {
         log(format!("{} file(s) were skipped due to errors.", errs.len()));
@@ -648,7 +690,7 @@ where
     })
 }
 
-fn write_single_vpk(entries: &mut Vec<FileEntry>, out_base: &Path) -> Result<PathBuf> {
+fn write_single_vpk(entries: &mut [FileEntry], out_base: &Path) -> Result<PathBuf> {
     for e in entries.iter_mut() {
         e.archive_index = 0x7FFF;
         e.offset = 0;
@@ -658,7 +700,7 @@ fn write_single_vpk(entries: &mut Vec<FileEntry>, out_base: &Path) -> Result<Pat
     let file = File::create(&out_path)?;
     let mut writer = BufWriter::new(file);
 
-    let (tree_bytes, data_bytes) = build_tree_and_embedded(entries);
+    let (tree_bytes, data_bytes) = build_tree_and_embedded(entries)?;
 
     let header = VpkHeader {
         signature: 0x55AA1234,
@@ -676,19 +718,39 @@ fn write_single_vpk(entries: &mut Vec<FileEntry>, out_base: &Path) -> Result<Pat
     Ok(out_path)
 }
 
-fn write_multi_vpk(entries: &mut Vec<FileEntry>, out_base: &Path) -> Result<Vec<PathBuf>> {
+fn write_multi_vpk(entries: &mut [FileEntry], out_base: &Path) -> Result<Vec<PathBuf>> {
+    // Clean up any leftover chunk files from previous runs.
+    for i in 0u32.. {
+        let old_chunk = PathBuf::from(format!("{}_{:03}.vpk", out_base.display(), i));
+        if old_chunk.exists() {
+            let _ = fs::remove_file(&old_chunk);
+        } else {
+            break;
+        }
+    }
+    let old_dir = PathBuf::from(format!("{}_dir.vpk", out_base.display()));
+    if old_dir.exists() {
+        let _ = fs::remove_file(&old_dir);
+    }
+
     let mut chunks: Vec<Vec<u8>> = vec![Vec::new()];
     let mut output_files = Vec::new();
 
     for e in entries.iter_mut() {
-        let current_chunk = chunks.len() - 1;
-        let current_size = chunks[current_chunk].len() as u64;
+        // First Fit: find the first existing chunk with enough remaining space
+        let target = chunks
+            .iter()
+            .position(|c| c.len() as u64 + e.size as u64 <= CHUNK_SIZE);
 
-        if current_size + e.size as u64 > CHUNK_SIZE && current_size > 0 {
-            chunks.push(Vec::new());
-        }
+        let chunk_idx = match target {
+            Some(idx) => idx,
+            None => {
+                // No existing chunk fits — open a new one
+                chunks.push(Vec::new());
+                chunks.len() - 1
+            }
+        };
 
-        let chunk_idx = chunks.len() - 1;
         e.archive_index = chunk_idx as u16;
         e.offset = chunks[chunk_idx].len() as u32;
         chunks[chunk_idx].extend_from_slice(&e.data);
@@ -704,7 +766,7 @@ fn write_multi_vpk(entries: &mut Vec<FileEntry>, out_base: &Path) -> Result<Vec<
     let file = File::create(&dir_path)?;
     let mut writer = BufWriter::new(file);
 
-    let (tree_bytes, _) = build_tree_and_embedded(entries);
+    let (tree_bytes, _) = build_tree_and_embedded(entries)?;
 
     let header = VpkHeader {
         signature: 0x55AA1234,
@@ -722,7 +784,7 @@ fn write_multi_vpk(entries: &mut Vec<FileEntry>, out_base: &Path) -> Result<Vec<
     Ok(output_files)
 }
 
-fn build_tree_and_embedded(entries: &[FileEntry]) -> (Vec<u8>, Vec<u8>) {
+fn build_tree_and_embedded(entries: &[FileEntry]) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut tree: HashMap<&str, HashMap<&str, Vec<&FileEntry>>> = HashMap::new();
 
     for e in entries {
@@ -770,7 +832,8 @@ fn build_tree_and_embedded(entries: &[FileEntry]) -> (Vec<u8>, Vec<u8>) {
                 dir_buf.extend_from_slice(&f.archive_index.to_le_bytes());
 
                 if f.archive_index == 0x7FFF {
-                    let offset = data_buf.len() as u32;
+                    let offset: u32 = data_buf.len().try_into()
+                        .map_err(|_| anyhow::anyhow!("Total data size exceeds 4 GB limit for single VPK file"))?;
                     dir_buf.extend_from_slice(&offset.to_le_bytes());
                     dir_buf.extend_from_slice(&f.size.to_le_bytes());
                     data_buf.extend_from_slice(&f.data);
@@ -790,7 +853,7 @@ fn build_tree_and_embedded(entries: &[FileEntry]) -> (Vec<u8>, Vec<u8>) {
 
     dir_buf.push(0);
 
-    (dir_buf, data_buf)
+    Ok((dir_buf, data_buf))
 }
 
 fn write_cstring(buf: &mut Vec<u8>, s: &str) {

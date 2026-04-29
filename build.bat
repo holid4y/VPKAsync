@@ -16,8 +16,8 @@ cargo build --release
 if %errorlevel% == 0 (
     echo.
     echo BUILD OK! Executable at: target\release\async_vpk.exe
-    copy /Y target\release\async_vpk.exe async_vpk.exe
-    echo Copied to async_vpk.exe in the current folder.
+    copy /Y target\release\async_vpk.exe VPKAsync_v1.1.1.exe
+    echo Copied to VPKAsync_v1.1.1.exe in the current folder.
 ) else (
     echo Build error.
 )
