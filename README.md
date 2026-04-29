@@ -3,7 +3,7 @@
 A small tool that transforms a folder into VPK files for the Source Engine, created with Team Fortress 2 in mind.
 It reads the files in a folder, builds the VPK structure, and writes the output in the format expected by the engine, the same as Valve's vpk.exe already does, but 4x faster.
 
-If the input folder exceeds 200 MB, the tool automatically enables it's multi-chunk mode.
+If the input folder exceeds 600 MB, the tool automatically enables its multi-chunk mode.
 In this mode, the output is split into multiple VPK files (_000.vpk, _001.vpk, etc.) along with a _dir.vpk index, ensuring compatibility with the Source Engine format.
 
 ## 1. Installation
@@ -34,7 +34,7 @@ target\release\async_vpk.exe
 If you prefer the Windows script, run:
 
 ```bat
-build.bat
+.\build.bat
 ```
 
 ## Usage

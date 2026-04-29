@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use crc32fast::Hasher;
@@ -7,12 +9,13 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use walkdir::WalkDir;
 
-const SINGLE_VPK_LIMIT: u64 = 200 * 1024 * 1024;
-const CHUNK_SIZE: u64 = 200 * 1024 * 1024;
+const SINGLE_VPK_LIMIT: u64 = 600 * 1024 * 1024;
+const CHUNK_SIZE: u64 = 600 * 1024 * 1024;
 
 #[repr(C, packed)]
 struct VpkHeader {
@@ -36,7 +39,7 @@ struct FileEntry {
 #[command(
     name = "async_vpk",
     about = "Async/parallel VPK creator for TF2 - replacement for Valve's vpk.exe",
-    version = "1.0.0"
+    version = "1.1.0"
 )]
 struct Cli {
     #[arg(help = "Folder to be packaged into a VPK")]
@@ -45,14 +48,19 @@ struct Cli {
     #[arg(short, long, help = "Output base path (without extension). Default: input folder name")]
     output: Option<PathBuf>,
 
-    #[arg(long, help = "Force single-file mode even above 200 MB")]
+    #[arg(long, conflicts_with = "multi", help = "Force single-file mode even above 600 MB")]
     single: bool,
 
-    #[arg(long, help = "Force multi-chunk mode even below 200 MB")]
+    #[arg(long, conflicts_with = "single", help = "Force multi-chunk mode even below 600 MB")]
     multi: bool,
 
-    #[arg(short, long, help = "Number of threads (default: all available CPU cores)")]
-    threads: Option<usize>,
+    #[arg(
+        short,
+        long,
+        value_parser = clap::value_parser!(NonZeroUsize),
+        help = "Number of threads (default: all available CPU cores)"
+    )]
+    threads: Option<NonZeroUsize>,
 }
 
 #[derive(Clone, Copy)]
@@ -357,7 +365,7 @@ fn run_cli() -> Result<()> {
     let options = PackOptions {
         single: cli.single,
         multi: cli.multi,
-        threads: cli.threads,
+        threads: cli.threads.map(|n| n.get()),
     };
 
     println!("═══════════════════════════════════════════════");
@@ -385,8 +393,19 @@ fn run_cli() -> Result<()> {
 }
 
 fn run_gui() -> Result<()> {
+    let viewport = match load_window_icon() {
+        Ok(icon) => egui::ViewportBuilder::default()
+            .with_inner_size([760.0, 560.0])
+            .with_icon(icon),
+        Err(err) => {
+            // Fallback keeps the app usable even if icon decoding fails.
+            eprintln!("Warning: could not load window icon: {err}");
+            egui::ViewportBuilder::default().with_inner_size([760.0, 560.0])
+        }
+    };
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([760.0, 560.0]),
+        viewport,
         ..Default::default()
     };
 
@@ -396,6 +415,32 @@ fn run_gui() -> Result<()> {
         Box::new(|_cc| Ok(Box::new(VpkGuiApp::default()))),
     )
     .map_err(|e| anyhow!("Failed to start UI: {}", e))
+}
+
+fn load_window_icon() -> Result<egui::IconData> {
+    let icon_bytes = include_bytes!("../icon.ico");
+    let icon_dir = ico::IconDir::read(std::io::Cursor::new(icon_bytes.as_slice()))
+        .context("Failed to parse icon.ico")?;
+
+    let best_entry = icon_dir
+        .entries()
+        .iter()
+        .max_by_key(|entry| {
+            let w = u32::from(entry.width());
+            let h = u32::from(entry.height());
+            w.saturating_mul(h)
+        })
+        .ok_or_else(|| anyhow!("icon.ico does not contain any icon entries"))?;
+
+    let image = best_entry
+        .decode()
+        .context("Failed to decode icon image from icon.ico")?;
+
+    Ok(egui::IconData {
+        rgba: image.rgba_data().to_vec(),
+        width: u32::from(image.width()),
+        height: u32::from(image.height()),
+    })
 }
 
 fn default_output_base(input: &Path) -> PathBuf {
@@ -539,6 +584,18 @@ where
                     .replace('\\', "/");
 
                 let dir = if dir.is_empty() { " ".to_string() } else { dir };
+                // VPK v1 stores file size in u32, so larger files are skipped safely.
+                if data.len() > u32::MAX as usize {
+                    if let Ok(mut guard) = errors.lock() {
+                        guard.push(format!(
+                            "{}: file is too large for VPK v1 (max {} bytes)",
+                            path.display(),
+                            u32::MAX
+                        ));
+                    }
+                    return None;
+                }
+
                 let size = data.len() as u32;
 
                 Some(FileEntry {
@@ -679,13 +736,33 @@ fn build_tree_and_embedded(entries: &[FileEntry]) -> (Vec<u8>, Vec<u8>) {
     let mut dir_buf: Vec<u8> = Vec::new();
     let mut data_buf: Vec<u8> = Vec::new();
 
-    for (ext, dirs) in &tree {
+    // Sort keys to keep output stable across runs.
+    let mut exts: Vec<&str> = tree.keys().copied().collect();
+    exts.sort_unstable();
+
+    for ext in exts {
+        let dirs = match tree.get(ext) {
+            Some(d) => d,
+            None => continue,
+        };
+
         write_cstring(&mut dir_buf, ext);
 
-        for (dir, files) in dirs {
+        let mut dir_keys: Vec<&str> = dirs.keys().copied().collect();
+        dir_keys.sort_unstable();
+
+        for dir in dir_keys {
+            let files = match dirs.get(dir) {
+                Some(f) => f,
+                None => continue,
+            };
+
             write_cstring(&mut dir_buf, dir);
 
-            for f in files {
+            let mut sorted_files = files.clone();
+            sorted_files.sort_by(|a, b| a.stem.cmp(&b.stem));
+
+            for f in sorted_files {
                 write_cstring(&mut dir_buf, &f.stem);
 
                 dir_buf.extend_from_slice(&f.crc32.to_le_bytes());
