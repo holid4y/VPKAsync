@@ -602,25 +602,33 @@ where
 
                 bytes_read.fetch_add(data.len() as u64, Ordering::Relaxed);
 
+                // Source's VPK lookup lowercases the requested path before comparing
+                // against stored bytes, so every component (ext, dir, stem) must be stored
+                // in lowercase. Valve's vpk.exe and ValvePak both do this. Without it,
+                // any mod with mixed-case folders or filenames produces a VPK whose
+                // entries the engine can never find.
                 let ext = rel
                     .extension()
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_lowercase();
+                // Valve uses a single space as the sentinel for "no extension" and "root directory".
+                // An empty string would emit just \0, which the tree parser reads as a section terminator.
                 let ext = if ext.is_empty() { " ".to_string() } else { ext };
 
                 let stem = rel
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
-                    .to_string();
+                    .to_lowercase();
                 let stem = if stem.is_empty() { " ".to_string() } else { stem };
 
                 let dir = rel
                     .parent()
                     .and_then(|p| p.to_str())
-                    .unwrap_or(" ")
-                    .replace('\\', "/");
+                    .unwrap_or("")
+                    .replace('\\', "/")
+                    .to_lowercase();
 
                 let dir = if dir.is_empty() { " ".to_string() } else { dir };
                 // VPK v1 stores file size in u32, so larger files are skipped safely.
@@ -660,9 +668,6 @@ where
     } else {
         read_entries()
     };
-
-    // FFD: sort largest-first so the packing loop achieves ~95% bin utilization
-    entries.sort_unstable_by_key(|e| std::cmp::Reverse(e.size));
 
     let errs = errors.into_inner().unwrap_or_default();
     if !errs.is_empty() {
@@ -714,8 +719,56 @@ fn write_single_vpk(entries: &mut [FileEntry], out_base: &Path) -> Result<PathBu
     writer.write_all(&tree_bytes)?;
     writer.write_all(&data_bytes)?;
     writer.flush()?;
+    drop(writer);
+
+    verify_vpk_single(&out_path, &tree_bytes, entries)?;
 
     Ok(out_path)
+}
+
+/// Reads back the written single-file VPK and confirms every entry's bytes
+/// match what was originally packed. A mismatch here means the write path
+/// has an offset or size bug that would cause TF2 to read wrong file data.
+fn verify_vpk_single(vpk_path: &Path, tree_bytes: &[u8], entries: &[FileEntry]) -> Result<()> {
+    let vpk_bytes = fs::read(vpk_path)
+        .with_context(|| format!("verify: could not re-read {}", vpk_path.display()))?;
+
+    let header_size: usize = 12; // v1: sig(4) + ver(4) + tree_size(4)
+    let data_start = header_size + tree_bytes.len();
+
+    let mut mismatches = 0usize;
+
+    for e in entries {
+        let start = data_start + e.offset as usize;
+        let end = start + e.size as usize;
+
+        if end > vpk_bytes.len() {
+            eprintln!(
+                "verify FAIL: {}/{}.{} — offset {} + size {} exceeds VPK size {}",
+                e.dir, e.stem, e.ext, e.offset, e.size, vpk_bytes.len()
+            );
+            mismatches += 1;
+            continue;
+        }
+
+        if &vpk_bytes[start..end] != e.data.as_slice() {
+            eprintln!(
+                "verify FAIL: {}/{}.{} — bytes at [{}, {}) do not match original data",
+                e.dir, e.stem, e.ext, start, end
+            );
+            mismatches += 1;
+        }
+    }
+
+    if mismatches > 0 {
+        return Err(anyhow::anyhow!(
+            "VPK self-check failed: {} file(s) have wrong data in the written archive. \
+             This is a VPKAsync bug — please report it.",
+            mismatches
+        ));
+    }
+
+    Ok(())
 }
 
 fn write_multi_vpk(entries: &mut [FileEntry], out_base: &Path) -> Result<Vec<PathBuf>> {
@@ -737,7 +790,7 @@ fn write_multi_vpk(entries: &mut [FileEntry], out_base: &Path) -> Result<Vec<Pat
     let mut output_files = Vec::new();
 
     for e in entries.iter_mut() {
-        // First Fit: find the first existing chunk with enough remaining space
+        // Keep the packing order stable and append into the first chunk that fits.
         let target = chunks
             .iter()
             .position(|c| c.len() as u64 + e.size as u64 <= CHUNK_SIZE);
@@ -756,9 +809,11 @@ fn write_multi_vpk(entries: &mut [FileEntry], out_base: &Path) -> Result<Vec<Pat
         chunks[chunk_idx].extend_from_slice(&e.data);
     }
 
+    let mut chunk_paths = Vec::new();
     for (i, chunk) in chunks.iter().enumerate() {
         let chunk_path = PathBuf::from(format!("{}_{:03}.vpk", out_base.display(), i));
         fs::write(&chunk_path, chunk)?;
+        chunk_paths.push(chunk_path.clone());
         output_files.push(chunk_path);
     }
 
@@ -779,30 +834,87 @@ fn write_multi_vpk(entries: &mut [FileEntry], out_base: &Path) -> Result<Vec<Pat
     writer.write_all(&header.tree_size.to_le_bytes())?;
     writer.write_all(&tree_bytes)?;
     writer.flush()?;
+    drop(writer);
+
+    verify_vpk_multi(&chunk_paths, entries)?;
 
     output_files.push(dir_path);
     Ok(output_files)
 }
 
-fn build_tree_and_embedded(entries: &[FileEntry]) -> Result<(Vec<u8>, Vec<u8>)> {
-    let mut tree: HashMap<&str, HashMap<&str, Vec<&FileEntry>>> = HashMap::new();
+/// Reads back every chunk file and confirms each entry's bytes are correct.
+fn verify_vpk_multi(chunk_paths: &[PathBuf], entries: &[FileEntry]) -> Result<()> {
+    let chunks: Vec<Vec<u8>> = chunk_paths
+        .iter()
+        .map(|p| fs::read(p).with_context(|| format!("verify: could not re-read {}", p.display())))
+        .collect::<Result<_>>()?;
+
+    let mut mismatches = 0usize;
 
     for e in entries {
-        tree.entry(&e.ext)
+        let idx = e.archive_index as usize;
+        if idx >= chunks.len() {
+            eprintln!(
+                "verify FAIL: {}/{}.{} — archive_index {} out of range (only {} chunks)",
+                e.dir, e.stem, e.ext, idx, chunks.len()
+            );
+            mismatches += 1;
+            continue;
+        }
+
+        let chunk = &chunks[idx];
+        let start = e.offset as usize;
+        let end = start + e.size as usize;
+
+        if end > chunk.len() {
+            eprintln!(
+                "verify FAIL: {}/{}.{} — offset {} + size {} exceeds chunk {} size {}",
+                e.dir, e.stem, e.ext, e.offset, e.size, idx, chunk.len()
+            );
+            mismatches += 1;
+            continue;
+        }
+
+        if &chunk[start..end] != e.data.as_slice() {
+            eprintln!(
+                "verify FAIL: {}/{}.{} — bytes in chunk {} at [{}, {}) do not match original",
+                e.dir, e.stem, e.ext, idx, start, end
+            );
+            mismatches += 1;
+        }
+    }
+
+    if mismatches > 0 {
+        return Err(anyhow::anyhow!(
+            "VPK self-check failed: {} file(s) have wrong data in the written archive. \
+             This is a VPKAsync bug — please report it.",
+            mismatches
+        ));
+    }
+
+    Ok(())
+}
+
+fn build_tree_and_embedded(entries: &mut [FileEntry]) -> Result<(Vec<u8>, Vec<u8>)> {
+    let mut tree: HashMap<String, HashMap<String, Vec<usize>>> = HashMap::new();
+
+    for (i, e) in entries.iter().enumerate() {
+        tree.entry(e.ext.clone())
             .or_default()
-            .entry(&e.dir)
+            .entry(e.dir.clone())
             .or_default()
-            .push(e);
+            .push(i);
     }
 
     let mut dir_buf: Vec<u8> = Vec::new();
     let mut data_buf: Vec<u8> = Vec::new();
+    let mut offset_writebacks: Vec<(usize, u32)> = Vec::new();
 
     // Sort keys to keep output stable across runs.
-    let mut exts: Vec<&str> = tree.keys().copied().collect();
+    let mut exts: Vec<String> = tree.keys().cloned().collect();
     exts.sort_unstable();
 
-    for ext in exts {
+    for ext in &exts {
         let dirs = match tree.get(ext) {
             Some(d) => d,
             None => continue,
@@ -810,10 +922,10 @@ fn build_tree_and_embedded(entries: &[FileEntry]) -> Result<(Vec<u8>, Vec<u8>)> 
 
         write_cstring(&mut dir_buf, ext);
 
-        let mut dir_keys: Vec<&str> = dirs.keys().copied().collect();
+        let mut dir_keys: Vec<String> = dirs.keys().cloned().collect();
         dir_keys.sort_unstable();
 
-        for dir in dir_keys {
+        for dir in &dir_keys {
             let files = match dirs.get(dir) {
                 Some(f) => f,
                 None => continue,
@@ -821,25 +933,27 @@ fn build_tree_and_embedded(entries: &[FileEntry]) -> Result<(Vec<u8>, Vec<u8>)> 
 
             write_cstring(&mut dir_buf, dir);
 
-            let mut sorted_files = files.clone();
-            sorted_files.sort_by(|a, b| a.stem.cmp(&b.stem));
+            let mut sorted_indices = files.clone();
+            sorted_indices.sort_by(|&a, &b| entries[a].stem.cmp(&entries[b].stem));
 
-            for f in sorted_files {
-                write_cstring(&mut dir_buf, &f.stem);
+            for &idx in &sorted_indices {
+                let e = &entries[idx];
+                write_cstring(&mut dir_buf, &e.stem);
 
-                dir_buf.extend_from_slice(&f.crc32.to_le_bytes());
+                dir_buf.extend_from_slice(&e.crc32.to_le_bytes());
                 dir_buf.extend_from_slice(&0u16.to_le_bytes());
-                dir_buf.extend_from_slice(&f.archive_index.to_le_bytes());
+                dir_buf.extend_from_slice(&e.archive_index.to_le_bytes());
 
-                if f.archive_index == 0x7FFF {
+                if e.archive_index == 0x7FFF {
                     let offset: u32 = data_buf.len().try_into()
                         .map_err(|_| anyhow::anyhow!("Total data size exceeds 4 GB limit for single VPK file"))?;
                     dir_buf.extend_from_slice(&offset.to_le_bytes());
-                    dir_buf.extend_from_slice(&f.size.to_le_bytes());
-                    data_buf.extend_from_slice(&f.data);
+                    dir_buf.extend_from_slice(&e.size.to_le_bytes());
+                    data_buf.extend_from_slice(&e.data);
+                    offset_writebacks.push((idx, offset));
                 } else {
-                    dir_buf.extend_from_slice(&f.offset.to_le_bytes());
-                    dir_buf.extend_from_slice(&f.size.to_le_bytes());
+                    dir_buf.extend_from_slice(&e.offset.to_le_bytes());
+                    dir_buf.extend_from_slice(&e.size.to_le_bytes());
                 }
 
                 dir_buf.extend_from_slice(&0xFFFFu16.to_le_bytes());
@@ -852,6 +966,11 @@ fn build_tree_and_embedded(entries: &[FileEntry]) -> Result<(Vec<u8>, Vec<u8>)> 
     }
 
     dir_buf.push(0);
+
+    drop(tree);
+    for (idx, offset) in offset_writebacks {
+        entries[idx].offset = offset;
+    }
 
     Ok((dir_buf, data_buf))
 }

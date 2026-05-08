@@ -9,9 +9,25 @@ In this mode, the output is split into multiple VPK files (`_000.vpk`, `_001.vpk
 ## 1. Installation
 Download a prebuilt binary from the [Releases](https://github.com/UnusualHatter/VPKAsync/releases) page.
 
-After downloading, just run the executable:
+After downloading, run the executable for your platform:
 
-`VPKAsync_v1.1.1.exe`
+Windows:
+
+```bat
+VPKAsync_v<version>.exe
+```
+
+Linux:
+
+```bash
+./VPKAsync_v<version>.bin
+```
+
+Linux releases include three file names that point to the same binary:
+
+- `VPKAsync_v<version>.bin` (recommended for most users)
+- `VPKAsync_v<version>.elf`
+- `VPKAsync_v<version>.x86_64`
 
 ### 2. Build from source
 
@@ -19,7 +35,7 @@ Only do this if you want to compile it yourself.
 
 1. Install Rust: https://rustup.rs
 2. Open this folder in a terminal.
-3. Build the project:
+3. Build the project manually:
 
 ```bat
 cargo build --release
@@ -31,11 +47,37 @@ The executable will be in:
 target\release\async_vpk.exe
 ```
 
-If you prefer the Windows script, run:
+If you prefer platform scripts:
+
+Windows:
 
 ```bat
 .\build.bat
 ```
+
+Linux:
+
+Before building on Linux, ensure you have the necessary system dependencies (for the GUI):
+
+```bash
+# Ubuntu/Debian/Mint
+sudo apt update
+sudo apt install build-essential libgtk-3-dev libwayland-dev libx11-dev libxkbcommon-dev
+```
+
+Then run the script:
+
+```bash
+chmod +x build_linux.sh
+./build_linux.sh
+```
+
+Script output files are created in `dist/`:
+
+- `dist/VPKAsync_v<version>.exe` (Windows)
+- `dist/VPKAsync_v<version>.bin` (Linux)
+- `dist/VPKAsync_v<version>.elf` (Linux)
+- `dist/VPKAsync_v<version>.x86_64` (Linux)
 
 ## Usage
 
@@ -44,7 +86,7 @@ If you prefer the Windows script, run:
 Run the app without arguments:
 
 ```bat
-VPKAsync_v1.1.1.exe
+VPKAsync_v<version>.exe
 ```
 
 Then:
@@ -61,13 +103,19 @@ The log box shows progress and the files that were created.
 async_vpk.exe "C:\path\to\your\folder"
 ```
 
+On Linux, use the `.bin` name:
+
+```bash
+./VPKAsync_v<version>.bin "/path/to/your/folder"
+```
+
 Useful options:
 
 ```bat
-async_vpk.exe --single "C:\path\to\your\folder"
-async_vpk.exe --multi "C:\path\to\your\folder"
-async_vpk.exe --output "C:\output" "C:\path\to\your\folder"
-async_vpk.exe --threads 4 "C:\path\to\your\folder"
+VPKAsync_v<version>.exe --single "C:\path\to\your\folder"
+VPKAsync_v<version>.exe --multi "C:\path\to\your\folder"
+VPKAsync_v<version>.exe --output "C:\output" "C:\path\to\your\folder"
+VPKAsync_v<version>.exe --threads 4 "C:\path\to\your\folder"
 ```
 
 ## How it works
@@ -88,7 +136,7 @@ The tool runs in three steps:
 ## Quick example
 
 ```bat
-async_vpk.exe "C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf\custom\my_mod"
+VPKAsync_v<version>.exe "C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf\custom\my_mod"
 ```
 
 That will generate the VPK files in the output folder you selected.
