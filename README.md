@@ -4,7 +4,7 @@ A small tool that transforms a folder into VPK files for the Source Engine, crea
 It reads the files in a folder, builds the VPK structure, and writes the output in the format expected by the engine, the same as Valve's vpk.exe already does, but 4x faster.
 
 If the input folder exceeds 600 MB, the tool automatically enables its multi-chunk mode.
-In this mode, the output is split into multiple VPK files (`_000.vpk`, `_001.vpk`, etc.) along with a `_dir.vpk` index. It uses a **First-Fit Decreasing (FFD) algorithm** to perfectly pack files, generating significantly fewer chunks than the standard compiler.
+In this mode, the output is split into multiple VPK files (`_000.vpk`, `_001.vpk`, etc.) along with a `_dir.vpk` index. Files are packed with a **stable first-fit strategy**: each file goes into the first chunk that still has room (600 MB target per chunk), which fills chunks tightly and keeps the output deterministic across runs.
 
 ## 1. Installation
 Download a prebuilt binary from the [Releases](https://github.com/UnusualHatter/VPKAsync/releases) page.
@@ -118,6 +118,18 @@ VPKAsync_v<version>.exe --output "C:\output" "C:\path\to\your\folder"
 VPKAsync_v<version>.exe --threads 4 "C:\path\to\your\folder"
 ```
 
+### Checking an existing VPK
+
+```bat
+VPKAsync_v<version>.exe --verify "C:\path\to\mod.vpk"
+VPKAsync_v<version>.exe --list "C:\path\to\mod.vpk"
+```
+
+`--verify` parses the archive and CRC-checks every stored file; for
+multi-chunk sets, point it at the `_dir.vpk` and it checks the chunk files
+too. `--list` prints the stored paths, which is handy for confirming that
+model and material paths inside the VPK match what TF2 expects.
+
 ## How it works
 
 The tool runs in three steps:
@@ -132,6 +144,9 @@ The tool runs in three steps:
 - It keeps the interface simple on purpose.
 - It automatically prevents corrupted VPKs by halting if a single file (or a single VPK output mode) exceeds the 4.29 GB format limit.
 - If a file cannot be read due to permission errors, it logs a clear warning in the interface.
+- The tool packs the **contents** of the selected folder, so select the mod root (the folder containing `models/`, `materials/`, etc.), not a subfolder. It warns if the selection looks like a subfolder — for example a folder named `models`, or model/material files without a top-level `models/` or `materials/` directory.
+- All file data is held in memory while packing, so very large inputs need a matching amount of free RAM; a warning is shown above 2 GB.
+- Symbolic links inside the input folder are not followed; each skipped link is reported as a warning.
 
 ## Quick example
 
