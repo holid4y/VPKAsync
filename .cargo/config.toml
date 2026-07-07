@@ -1,0 +1,7 @@
+[target.x86_64-pc-windows-gnu]
+linker = ".tools/llvm-mingw/bin/x86_64-w64-mingw32-clang"
+ar = ".tools/llvm-mingw/bin/llvm-ar"
+
+[target.x86_64-pc-windows-gnullvm]
+linker = ".tools/llvm-mingw/bin/x86_64-w64-mingw32-clang"
+ar = ".tools/llvm-mingw/bin/llvm-ar"

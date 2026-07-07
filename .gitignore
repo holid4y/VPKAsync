@@ -1,4 +1,6 @@
 /target/
+/.tools/
+/dist/
 /async_vpk.exe
 /*.exe
 /build

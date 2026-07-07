@@ -52,4 +52,4 @@ if %errorlevel% neq 0 (
 
 echo Created: dist\!OUTFILE!
 echo ------------------------------------------------
-pause
+if not defined CI pause
