@@ -88,14 +88,14 @@ pub fn run() -> Result<()> {
         threads: cli.threads.map(|n| n.get()),
     };
 
-    println!("═══════════════════════════════════════════════");
+    println!("===============================================");
     println!("  VPK Maker  |  Async/Parallel  |  TF2 compatible  ");
-    println!("═══════════════════════════════════════════════");
+    println!("===============================================");
 
     let summary = packer::package_folder(&input, &output, options, |line| println!("{}", line))?;
 
     println!();
-    println!("✓ Done!");
+    println!("Done!");
     println!(
         "Mode used: {}",
         if summary.use_multi {
@@ -116,7 +116,7 @@ pub fn run() -> Result<()> {
 /// characters so a crafted VPK cannot inject terminal escape sequences.
 fn sanitize_for_terminal(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .map(|c| if c.is_control() { '?' } else { c })
         .collect()
 }
 

@@ -6,7 +6,7 @@ use crate::vpk::format::{ArchiveLocation, FileEntry};
 use crate::vpk::{tree, writer};
 
 /// Appends `.vpk` instead of `Path::with_extension`, which would replace
-/// dot-suffixed folder names (`UEO_V1.02` → `UEO_V1.vpk`).
+/// dot-suffixed folder names (`UEO_V1.02` becomes `UEO_V1.vpk`).
 fn single_vpk_path(out_base: &Path) -> PathBuf {
     let name = out_base
         .file_name()

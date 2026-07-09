@@ -1,7 +1,12 @@
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
 [target.x86_64-pc-windows-gnu]
 linker = ".tools/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 ar = ".tools/llvm-mingw/bin/llvm-ar"
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=-static"]
 
 [target.x86_64-pc-windows-gnullvm]
 linker = ".tools/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 ar = ".tools/llvm-mingw/bin/llvm-ar"
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=-static"]

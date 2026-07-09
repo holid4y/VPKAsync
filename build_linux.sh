@@ -31,19 +31,21 @@ cargo build --release
 
 # Prepare dist directory
 mkdir -p dist
-BASE="dist/VPKAsync_v${VERSION}"
+LINUX_MAIN="dist/VPKAsync_v${VERSION}-LinuxMain.bin"
+LINUX_ELF="dist/VPKAsync_v${VERSION}-Linux.elf"
+LINUX_X86_64="dist/VPKAsync_v${VERSION}-Linux.x86_64"
 
 # Copy and rename for common Linux conventions
 echo "Copying binaries to dist/..."
-cp -f target/release/async_vpk "${BASE}.bin"
-cp -f target/release/async_vpk "${BASE}.elf"
-cp -f target/release/async_vpk "${BASE}.x86_64"
+cp -f target/release/async_vpk "${LINUX_MAIN}"
+cp -f target/release/async_vpk "${LINUX_ELF}"
+cp -f target/release/async_vpk "${LINUX_X86_64}"
 
-chmod +x "${BASE}.bin" "${BASE}.elf" "${BASE}.x86_64"
+chmod +x "${LINUX_MAIN}" "${LINUX_ELF}" "${LINUX_X86_64}"
 
 echo ""
 echo "BUILD OK! Created Linux binaries in 'dist/':"
-echo "  - ${BASE}.bin"
-echo "  - ${BASE}.elf"
-echo "  - ${BASE}.x86_64"
+echo "  - ${LINUX_ELF}"
+echo "  - ${LINUX_X86_64}"
+echo "  - ${LINUX_MAIN}"
 echo "------------------------------------------------"

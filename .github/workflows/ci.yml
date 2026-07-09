@@ -40,3 +40,8 @@ jobs:
 
       - name: Release build
         run: cargo build --release
+
+      - name: Check Windows release imports
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\check_windows_imports.ps1 -Path target\release\async_vpk.exe -StrictSystemOnly

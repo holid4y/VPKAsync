@@ -194,7 +194,7 @@ fn report(path: &Path, problems: Vec<String>) -> Result<()> {
 
     Err(anyhow!(
         "VPK self-check failed: {} problem(s) found in '{}'. \
-         This is a VPKAsync bug — please report it.",
+         This is a VPKAsync bug - please report it.",
         problems.len(),
         path.display()
     ))

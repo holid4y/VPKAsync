@@ -14,20 +14,22 @@ After downloading, run the executable for your platform:
 Windows:
 
 ```bat
-VPKAsync_v<version>.exe
+VPKAsync_v<version>-Windows.exe
 ```
+
+Windows releases are built as standalone 64-bit executables and should not require third-party DLLs next to the `.exe`.
 
 Linux:
 
 ```bash
-./VPKAsync_v<version>.bin
+./VPKAsync_v<version>-LinuxMain.bin
 ```
 
 Linux releases include three file names that point to the same binary:
 
-- `VPKAsync_v<version>.bin` (recommended for most users)
-- `VPKAsync_v<version>.elf`
-- `VPKAsync_v<version>.x86_64`
+- `VPKAsync_v<version>-LinuxMain.bin` (recommended for most users)
+- `VPKAsync_v<version>-Linux.elf`
+- `VPKAsync_v<version>-Linux.x86_64`
 
 ### 2. Build from source
 
@@ -74,10 +76,10 @@ chmod +x build_linux.sh
 
 Script output files are created in `dist/`:
 
-- `dist/VPKAsync_v<version>.exe` (Windows)
-- `dist/VPKAsync_v<version>.bin` (Linux)
-- `dist/VPKAsync_v<version>.elf` (Linux)
-- `dist/VPKAsync_v<version>.x86_64` (Linux)
+- `dist/VPKAsync_v<version>-Windows.exe` (Windows)
+- `dist/VPKAsync_v<version>-LinuxMain.bin` (Linux)
+- `dist/VPKAsync_v<version>-Linux.elf` (Linux)
+- `dist/VPKAsync_v<version>-Linux.x86_64` (Linux)
 
 ## Usage
 
@@ -86,7 +88,7 @@ Script output files are created in `dist/`:
 Run the app without arguments:
 
 ```bat
-VPKAsync_v<version>.exe
+VPKAsync_v<version>-Windows.exe
 ```
 
 Then:
@@ -106,23 +108,23 @@ async_vpk.exe "C:\path\to\your\folder"
 On Linux, use the `.bin` name:
 
 ```bash
-./VPKAsync_v<version>.bin "/path/to/your/folder"
+./VPKAsync_v<version>-LinuxMain.bin "/path/to/your/folder"
 ```
 
 Useful options:
 
 ```bat
-VPKAsync_v<version>.exe --single "C:\path\to\your\folder"
-VPKAsync_v<version>.exe --multi "C:\path\to\your\folder"
-VPKAsync_v<version>.exe --output "C:\output" "C:\path\to\your\folder"
-VPKAsync_v<version>.exe --threads 4 "C:\path\to\your\folder"
+VPKAsync_v<version>-Windows.exe --single "C:\path\to\your\folder"
+VPKAsync_v<version>-Windows.exe --multi "C:\path\to\your\folder"
+VPKAsync_v<version>-Windows.exe --output "C:\output" "C:\path\to\your\folder"
+VPKAsync_v<version>-Windows.exe --threads 4 "C:\path\to\your\folder"
 ```
 
 ### Checking an existing VPK
 
 ```bat
-VPKAsync_v<version>.exe --verify "C:\path\to\mod.vpk"
-VPKAsync_v<version>.exe --list "C:\path\to\mod.vpk"
+VPKAsync_v<version>-Windows.exe --verify "C:\path\to\mod.vpk"
+VPKAsync_v<version>-Windows.exe --list "C:\path\to\mod.vpk"
 ```
 
 `--verify` parses the archive and CRC-checks every stored file; for
@@ -144,14 +146,14 @@ The tool runs in three steps:
 - It keeps the interface simple on purpose.
 - It automatically prevents corrupted VPKs by halting if a single file (or a single VPK output mode) exceeds the 4.29 GB format limit.
 - If a file cannot be read due to permission errors, it logs a clear warning in the interface.
-- The tool packs the **contents** of the selected folder, so select the mod root (the folder containing `models/`, `materials/`, etc.), not a subfolder. It warns if the selection looks like a subfolder — for example a folder named `models`, or model/material files without a top-level `models/` or `materials/` directory.
+- The tool packs the **contents** of the selected folder, so select the mod root (the folder containing `models/`, `materials/`, etc.), not a subfolder. It warns if the selection looks like a subfolder - for example a folder named `models`, or model/material files without a top-level `models/` or `materials/` directory.
 - All file data is held in memory while packing, so very large inputs need a matching amount of free RAM; a warning is shown above 2 GB.
 - Symbolic links inside the input folder are not followed; each skipped link is reported as a warning.
 
 ## Quick example
 
 ```bat
-VPKAsync_v<version>.exe "C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf\custom\my_mod"
+VPKAsync_v<version>-Windows.exe "C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\tf\custom\my_mod"
 ```
 
 That will generate the VPK files in the output folder you selected.

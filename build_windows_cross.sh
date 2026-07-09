@@ -40,8 +40,22 @@ fi
 echo "Building Windows release (x86_64-pc-windows-gnullvm)..."
 cargo build --release --target x86_64-pc-windows-gnullvm
 
+EXE="target/x86_64-pc-windows-gnullvm/release/async_vpk.exe"
+echo "Checking Windows imports..."
+IMPORTS="$("${MINGW_DIR}/bin/llvm-objdump" -p "${EXE}" | sed -n 's/^[[:space:]]*DLL Name: //p' | sort -fu)"
+printf '%s\n' "${IMPORTS}" | sed 's/^/  /'
+
+ALLOWED_IMPORT_RE='^(advapi32|bcrypt|bcryptprimitives|cfgmgr32|comctl32|comdlg32|crypt32|d2d1|d3d11|d3d12|d3d9|dbghelp|dwmapi|dxgi|gdi32|hid|imm32|iphlpapi|kernel32|mpr|msimg32|msvcrt|ncrypt|normaliz|ntdll|ole32|oleacc|oleaut32|opengl32|propsys|rpcrt4|runtimeobject|secur32|setupapi|shcore|shell32|shlwapi|user32|userenv|uxtheme|version|windowscodecs|winhttp|wininet|winmm|winspool\.drv|ws2_32|wtsapi32)\.dll$|^(api-ms-win-|ext-ms-win-)'
+UNEXPECTED="$(printf '%s\n' "${IMPORTS}" | tr '[:upper:]' '[:lower:]' | grep -Ev "${ALLOWED_IMPORT_RE}" || true)"
+if [[ -n "${UNEXPECTED}" ]]; then
+    echo "ERROR: Windows build imports non-system DLLs:"
+    printf '%s\n' "${UNEXPECTED}" | sed 's/^/  /'
+    echo "The Windows release must be self-contained; check static CRT/runtime flags."
+    exit 1
+fi
+
 mkdir -p dist
-OUT="dist/VPKAsync_v${VERSION}.exe"
-cp -f "target/x86_64-pc-windows-gnullvm/release/async_vpk.exe" "${OUT}"
+OUT="dist/VPKAsync_v${VERSION}-Windows.exe"
+cp -f "${EXE}" "${OUT}"
 
 echo "BUILD OK! Created: ${OUT}"

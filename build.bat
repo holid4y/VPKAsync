@@ -10,7 +10,7 @@ if errorlevel 1 (
     echo ERROR: 'cargo' was not found in PATH.
     echo Install Rust/Cargo from: https://rustup.rs/
     echo After installing, reopen the terminal and run this script again.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
@@ -24,29 +24,51 @@ set "VERSION=%VERSION:"=%
 
 if "%VERSION%"=="" (
     echo ERROR: Could not read version from Cargo.toml.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
 echo Detected Version: %VERSION%
 
-cargo build --release
-if %errorlevel% neq 0 (
+set "TARGET=x86_64-pc-windows-msvc"
+
+where rustup >nul 2>&1
+if not errorlevel 1 (
+    rustup target add %TARGET% >nul
+    if errorlevel 1 (
+        echo.
+        echo ERROR: Failed to install Rust target %TARGET%.
+        if not defined CI pause
+        exit /b 1
+    )
+)
+
+cargo build --release --target %TARGET%
+if errorlevel 1 (
     echo.
     echo ERROR: Cargo build failed.
-    pause
+    if not defined CI pause
+    exit /b 1
+)
+
+set "EXE=target\%TARGET%\release\async_vpk.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\check_windows_imports.ps1" -Path "!EXE!" -StrictSystemOnly
+if errorlevel 1 (
+    echo.
+    echo ERROR: Windows dependency check failed.
+    if not defined CI pause
     exit /b 1
 )
 
 if not exist dist mkdir dist
-set "OUTFILE=VPKAsync_v%VERSION%.exe"
+set "OUTFILE=VPKAsync_v%VERSION%-Windows.exe"
 
 echo.
-echo BUILD OK! Executable at: target\release\async_vpk.exe
-copy /Y "target\release\async_vpk.exe" "dist\!OUTFILE!" >nul
-if %errorlevel% neq 0 (
+echo Build OK. Executable at: !EXE!
+copy /Y "!EXE!" "dist\!OUTFILE!" >nul
+if errorlevel 1 (
     echo ERROR: Failed to copy file into dist.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
