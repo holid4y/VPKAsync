@@ -7,7 +7,7 @@ If the input folder exceeds 600 MB, the tool automatically enables its multi-chu
 In this mode, the output is split into multiple VPK files (`_000.vpk`, `_001.vpk`, etc.) along with a `_dir.vpk` index. Files are packed with a **stable first-fit strategy**: each file goes into the first chunk that still has room (600 MB target per chunk), which fills chunks tightly and keeps the output deterministic across runs.
 
 ## 1. Installation
-Download a prebuilt binary from the [Releases](https://github.com/UnusualHatter/VPKAsync/releases) page.
+Download a prebuilt binary from the [Releases](https://github.com/holid4y/VPKAsync/releases) page.
 
 After downloading, run the executable for your platform:
 
